@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Рогалик</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+        }
+        
+        .game-container {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .field {
+            display: grid;
+            grid-template-columns: repeat(40, 15px);
+            grid-template-rows: repeat(24, 15px);
+            gap: 1px;
+            background-color: #333;
+            padding: 10px;
+            border: 2px solid #666;
+        }
+        
+        .tile {
+            width: 15px;
+            height: 15px;
+            position: relative;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        
+        .wall { 
+            background-image: url('tile-W.png');
+        }
+        .floor { 
+            background-image: url('tile-.png');
+        }
+        .hero { 
+            background-image: url('tile-P.png');
+        }
+        .enemy { 
+            background-image: url('tile-E.png');
+        }
+        .sword { 
+            background-image: url('tile-SW.png');
+        }
+        .potion { 
+            background-image: url('tile-HP.png');
+        }
+        
+        .health {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background-color: #4CAF50;
+            transition: width 0.2s;
+            border: 1px solid #000;
+            box-sizing: border-box;
+        }
+        
+        .info-panel {
+            min-width: 200px;
+            padding: 20px;
+            background-color: #2a2a2a;
+            border: 2px solid #666;
+            border-radius: 5px;
+        }
+        
+        .stat {
+            margin: 10px 0;
+            padding: 5px;
+            background-color: #333;
+            border-radius: 3px;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        
+        .message {
+            background-color: #444;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        
+        .game-over {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2a2a2a;
+            padding: 30px;
+            border: 3px solid #666;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        .debug-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Игра "РОГАЛИК"</h1>
+    
+    <div class="debug-info">
+        Статус: <span id="debug-status">Загрузка...</span><br>
+        Последняя клавиша: <span id="last-key">нет</span><br>
+        Позиция героя: <span id="hero-pos">нет</span><br>
+        Рендеров: <span id="render-count">0</span>
+    </div>
+    
+    <div class="game-container">
+        <div class="field"></div>
+        
+        <div class="info-panel">
+            <h3>Информация</h3>
+            <div class="stat">Здоровье: <span id="hero-health">100</span>/100</div>
+            <div class="stat">Сила атаки: <span id="hero-attack">10</span></div>
+            <div class="stat">Враги: <span id="enemies-count">10</span></div>
+            <div class="stat">Мечи: <span id="swords-count">2</span></div>
+            <div class="stat">Зелья: <span id="potions-count">10</span></div>
+            
+            <div class="controls">
+                <strong>Управление:</strong><br>
+                W, A, S, D - движение<br>
+                ПРОБЕЛ - атака врагов рядом<br>
+                R - новая игра<br>
+                <div class="stat">Режим врагов: <span id="enemy-mode">Пошаговый</span></div>
+            </div>
+            
+            <div id="messages"></div>
+            
+            <button onclick="game.newGame()">Новая игра</button>
+        </div>
+    </div>
+
+    <script>
+        if (typeof jQuery === 'undefined') {
+            alert('jQuery не загружен!');
+        }
+        
+        var TILE_TYPES = {
+            WALL: 0,
+            FLOOR: 1
+        };
+        
+        var ENTITY_TYPES = {
+            HERO: 'hero',
+            ENEMY: 'enemy', 
+            SWORD: 'sword',
+            POTION: 'potion'
+        };
+        
+        function RoguelikeGame() {
+            this.mapWidth = 40;
+            this.mapHeight = 24;
+            this.map = [];
+            this.entities = [];
+            this.hero = null;
+            this.messages = [];
+            this.gameOver = false;
+            this.enemyMode = 'turn-based';
+            this.enemyTimer = null;
+            
+            this.init();
+        }
+        
+        RoguelikeGame.prototype.init = function() {
+            var self = this;
+            console.log('Инициализация игры...');
+            
+            $(document).ready(function() {
+                console.log('DOM готов, запускаем игру');
+                $('#debug-status').text('Игра запущена');
+                self.newGame();
+                self.bindEvents();
+            });
+        };
+        
+        RoguelikeGame.prototype.newGame = function() {
+            console.log('Новая игра');
+            this.gameOver = false;
+            this.messages = [];
+            $('.game-over').remove();
+            
+            if (this.enemyTimer) {
+                clearInterval(this.enemyTimer);
+                this.enemyTimer = null;
+            }
+            
+            this.generateMap();
+            this.placeEntities();
+            this.render();
+            this.addMessage("Новая игра началась! Найди и уничтожь всех врагов!");
+            
+            if (this.enemyMode === 'real-time') {
+                this.startEnemyTimer();
+            }
+        };
+        
+        RoguelikeGame.prototype.generateMap = function() {
+            this.map = [];
+            for (var y = 0; y < this.mapHeight; y++) {
+                this.map[y] = [];
+                for (var x = 0; x < this.mapWidth; x++) {
+                    this.map[y][x] = TILE_TYPES.WALL;
+                }
+            }
+            
+            var rooms = [];
+            var roomCount = this.random(5, 10);
+            
+            for (var i = 0; i < roomCount; i++) {
+                var attempts = 0;
+                while (attempts < 50) {
+                    var width = this.random(3, 8);
+                    var height = this.random(3, 8);
+                    var x = this.random(1, this.mapWidth - width - 1);
+                    var y = this.random(1, this.mapHeight - height - 1);
+                    
+                    var room = { x: x, y: y, width: width, height: height };
+                    
+                    if (!this.roomOverlaps(room, rooms)) {
+                        rooms.push(room);
+                        this.createRoom(room);
+                        break;
+                    }
+                    attempts++;
+                }
+            }
+            
+            this.createCorridors();
+            this.ensureConnectivity();
+        };
+        
+        RoguelikeGame.prototype.roomOverlaps = function(newRoom, existingRooms) {
+            for (var i = 0; i < existingRooms.length; i++) {
+                var room = existingRooms[i];
+                if (newRoom.x < room.x + room.width + 1 &&
+                    newRoom.x + newRoom.width + 1 > room.x &&
+                    newRoom.y < room.y + room.height + 1 &&
+                    newRoom.y + newRoom.height + 1 > room.y) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        RoguelikeGame.prototype.createRoom = function(room) {
+            for (var y = room.y; y < room.y + room.height; y++) {
+                for (var x = room.x; x < room.x + room.width; x++) {
+                    this.map[y][x] = TILE_TYPES.FLOOR;
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.createCorridors = function() {
+            var hCorridors = this.random(3, 5);
+            for (var i = 0; i < hCorridors; i++) {
+                var y = this.random(1, this.mapHeight - 1);
+                var startX = this.random(0, this.mapWidth / 2);
+                var endX = this.random(this.mapWidth / 2, this.mapWidth);
+                
+                for (var x = startX; x < endX; x++) {
+                    this.map[y][x] = TILE_TYPES.FLOOR;
+                }
+            }
+            
+            var vCorridors = this.random(3, 5);
+            for (var i = 0; i < vCorridors; i++) {
+                var x = this.random(1, this.mapWidth - 1);
+                var startY = this.random(0, this.mapHeight / 2);
+                var endY = this.random(this.mapHeight / 2, this.mapHeight);
+                
+                for (var y = startY; y < endY; y++) {
+                    this.map[y][x] = TILE_TYPES.FLOOR;
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.ensureConnectivity = function() {
+            var centerX = Math.floor(this.mapWidth / 2);
+            var centerY = Math.floor(this.mapHeight / 2);
+            
+            for (var x = 0; x < this.mapWidth; x++) {
+                this.map[centerY][x] = TILE_TYPES.FLOOR;
+            }
+            
+            for (var y = 0; y < this.mapHeight; y++) {
+                this.map[y][centerX] = TILE_TYPES.FLOOR;
+            }
+        };
+        
+        RoguelikeGame.prototype.placeEntities = function() {
+            this.entities = [];
+            
+            this.hero = {
+                type: ENTITY_TYPES.HERO,
+                x: 0,
+                y: 0,
+                health: 100,
+                maxHealth: 100,
+                attack: 10
+            };
+            
+            this.placeEntityRandomly(this.hero);
+            this.entities.push(this.hero);
+            
+            for (var i = 0; i < 10; i++) {
+                var enemy = {
+                    type: ENTITY_TYPES.ENEMY,
+                    x: 0,
+                    y: 0,
+                    health: 30,
+                    maxHealth: 30,
+                    attack: 8
+                };
+                this.placeEntityRandomly(enemy);
+                this.entities.push(enemy);
+            }
+            
+            for (var i = 0; i < 2; i++) {
+                var sword = {
+                    type: ENTITY_TYPES.SWORD,
+                    x: 0,
+                    y: 0
+                };
+                this.placeEntityRandomly(sword);
+                this.entities.push(sword);
+            }
+            
+            for (var i = 0; i < 10; i++) {
+                var potion = {
+                    type: ENTITY_TYPES.POTION,
+                    x: 0,
+                    y: 0
+                };
+                this.placeEntityRandomly(potion);
+                this.entities.push(potion);
+            }
+        };
+        
+        RoguelikeGame.prototype.placeEntityRandomly = function(entity) {
+            var attempts = 0;
+            while (attempts < 100) {
+                var x = this.random(0, this.mapWidth);
+                var y = this.random(0, this.mapHeight);
+                
+                if (this.map[y][x] === TILE_TYPES.FLOOR && !this.getEntityAt(x, y)) {
+                    entity.x = x;
+                    entity.y = y;
+                    return;
+                }
+                attempts++;
+            }
+        };
+        
+        RoguelikeGame.prototype.random = function(min, max) {
+            return Math.floor(Math.random() * (max - min)) + min;
+        };
+        
+        RoguelikeGame.prototype.getEntityAt = function(x, y) {
+            for (var i = 0; i < this.entities.length; i++) {
+                if (this.entities[i].x === x && this.entities[i].y === y) {
+                    return this.entities[i];
+                }
+            }
+            return null;
+        };
+        
+        RoguelikeGame.prototype.removeEntity = function(entity) {
+            var index = this.entities.indexOf(entity);
+            if (index > -1) {
+                this.entities.splice(index, 1);
+            }
+        };
+        
+        RoguelikeGame.prototype.moveHero = function(dx, dy) {
+            if (this.gameOver) return;
+            
+            console.log('Попытка движения героя:', dx, dy);
+            
+            var newX = this.hero.x + dx;
+            var newY = this.hero.y + dy;
+            
+            if (this.isValidPosition(newX, newY)) {
+                this.checkItemsAt(newX, newY);
+                
+                this.hero.x = newX;
+                this.hero.y = newY;
+                
+                if (this.enemyMode === 'turn-based') {
+                    this.moveEnemies();
+                    this.enemyAttacks();
+                }
+                
+                this.render();
+                this.checkGameState();
+                
+                this.addMessage("Герой перемещен в (" + newX + ", " + newY + ")");
+            } else {
+                this.addMessage("Нельзя идти в этом направлении!");
+            }
+        };
+        
+        RoguelikeGame.prototype.isValidPosition = function(x, y) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) {
+                return false;
+            }
+            
+            if (this.map[y][x] === TILE_TYPES.WALL) {
+                return false;
+            }
+            
+            var entity = this.getEntityAt(x, y);
+            return !entity || entity.type !== ENTITY_TYPES.ENEMY;
+        };
+        
+        RoguelikeGame.prototype.checkItemsAt = function(x, y) {
+            console.log('Проверка предметов на позиции:', x, y);
+            var entity = this.getEntityAt(x, y);
+            
+            if (entity) {
+                console.log('Найден предмет:', entity.type);
+                if (entity.type === ENTITY_TYPES.SWORD) {
+                    this.hero.attack += 10;
+                    this.addMessage("Ты подобрал меч! Атака увеличена на 10.");
+                    this.removeEntity(entity);
+                    console.log('Меч подобран, новая атака:', this.hero.attack);
+                } else if (entity.type === ENTITY_TYPES.POTION) {
+                    var oldHealth = this.hero.health;
+                    this.hero.health = Math.min(this.hero.maxHealth, this.hero.health + 30);
+                    this.addMessage("Ты выпил зелье здоровья! Здоровье восстановлено на 30.");
+                    this.removeEntity(entity);
+                    console.log('Зелье выпито, здоровье:', oldHealth, '->', this.hero.health);
+                } else if (entity.type === ENTITY_TYPES.HERO || entity.type === ENTITY_TYPES.ENEMY) {
+                    console.log('На этой позиции персонаж (игнорируем):', entity.type);
+                } else {
+                    console.log('Неизвестный тип предмета:', entity.type);
+                }
+            } else {
+                console.log('Предметов на этой позиции не найдено');
+            }
+        };
+        
+        RoguelikeGame.prototype.checkItems = function() {
+            this.checkItemsAt(this.hero.x, this.hero.y);
+        };
+        
+        RoguelikeGame.prototype.heroAttack = function() {
+            if (this.gameOver) return;
+            
+            console.log('Герой атакует');
+            
+            var directions = [
+                {x: -1, y: -1}, {x: 0, y: -1}, {x: 1, y: -1},
+                {x: -1, y: 0},                 {x: 1, y: 0},
+                {x: -1, y: 1},  {x: 0, y: 1},  {x: 1, y: 1}
+            ];
+            
+            var attackedAny = false;
+            
+            for (var i = 0; i < directions.length; i++) {
+                var dir = directions[i];
+                var targetX = this.hero.x + dir.x;
+                var targetY = this.hero.y + dir.y;
+                var entity = this.getEntityAt(targetX, targetY);
+                
+                if (entity && entity.type === ENTITY_TYPES.ENEMY) {
+                    entity.health -= this.hero.attack;
+                    attackedAny = true;
+                    
+                    if (entity.health <= 0) {
+                        this.addMessage("Ты убил врага!");
+                        this.removeEntity(entity);
+                    } else {
+                        this.addMessage("Ты атаковал врага! У него осталось " + entity.health + " HP.");
+                    }
+                }
+            }
+            
+            if (attackedAny) {
+                if (this.enemyMode === 'turn-based') {
+                    this.moveEnemies();
+                    this.enemyAttacks();
+                }
+                this.render();
+                this.checkGameState();
+            } else {
+                this.addMessage("Нет врагов рядом для атаки!");
+            }
+        };
+        
+        RoguelikeGame.prototype.moveEnemies = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            for (var i = 0; i < enemies.length; i++) {
+                var enemy = enemies[i];
+                
+                var directions = [
+                    {x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}
+                ];
+                
+                var dir = directions[this.random(0, directions.length)];
+                var newX = enemy.x + dir.x;
+                var newY = enemy.y + dir.y;
+                
+                if (this.isValidPosition(newX, newY) && !this.getEntityAt(newX, newY)) {
+                    enemy.x = newX;
+                    enemy.y = newY;
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.enemyAttacks = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            for (var i = 0; i < enemies.length; i++) {
+                var enemy = enemies[i];
+                var distance = Math.abs(enemy.x - this.hero.x) + Math.abs(enemy.y - this.hero.y);
+                
+                if (distance === 1) {
+                    this.hero.health -= enemy.attack;
+                    this.addMessage("Враг атаковал тебя! У тебя осталось " + this.hero.health + " HP.");
+                    
+                    if (this.hero.health <= 0) {
+                        this.gameOver = true;
+                        this.showGameOver(false);
+                    }
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.checkGameState = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            if (enemies.length === 0) {
+                this.gameOver = true;
+                this.showGameOver(true);
+            }
+        };
+        
+        RoguelikeGame.prototype.showGameOver = function(victory) {
+            var message = victory ? "Поздравляем! Ты победил всех врагов!" : "Игра окончена! Ты погиб.";
+            var gameOverDiv = $('<div class="game-over"><h2>' + message + '</h2><button onclick="game.newGame()">Новая игра</button></div>');
+            $('body').append(gameOverDiv);
+        };
+        
+        RoguelikeGame.prototype.render = function() {
+            console.log('Рендеринг карты...');
+            
+            var renderCount = parseInt($('#render-count').text()) + 1;
+            $('#render-count').text(renderCount);
+            
+            var field = $('.field');
+            field.empty();
+            
+            console.log('Позиция героя:', this.hero.x, this.hero.y);
+            $('#hero-pos').text(this.hero.x + ', ' + this.hero.y);
+            
+            for (var y = 0; y < this.mapHeight; y++) {
+                for (var x = 0; x < this.mapWidth; x++) {
+                    var tile = $('<div class="tile"></div>');
+                    
+                    if (this.map[y][x] === TILE_TYPES.WALL) {
+                        tile.addClass('wall');
+                    } else {
+                        tile.addClass('floor');
+                    }
+                    
+                    var entity = this.getEntityAt(x, y);
+                    if (entity) {
+                        tile.addClass(entity.type);
+                        
+                        if (entity.type === ENTITY_TYPES.HERO || entity.type === ENTITY_TYPES.ENEMY) {
+                            var healthPercent = (entity.health / entity.maxHealth) * 100;
+                            tile.append('<div class="health" style="width: ' + healthPercent + '%;"></div>');
+                        }
+                        
+                        if (entity.type === ENTITY_TYPES.HERO) {
+                            console.log('Герой на позиции:', x, y);
+                        }
+                    }
+                    
+                    field.append(tile);
+                }
+            }
+            
+            this.updateUI();
+            console.log('Рендеринг завершен');
+        };
+        
+        RoguelikeGame.prototype.updateUI = function() {
+            $('#hero-health').text(this.hero.health);
+            $('#hero-attack').text(this.hero.attack);
+            
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            var swords = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.SWORD; });
+            var potions = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.POTION; });
+            
+            $('#enemies-count').text(enemies.length);
+            $('#swords-count').text(swords.length);
+            $('#potions-count').text(potions.length);
+            
+            $('#enemy-mode').text(this.enemyMode === 'turn-based' ? 'Пошаговый' : 'Реальное время');
+            
+            var messagesDiv = $('#messages');
+            messagesDiv.empty();
+            
+            for (var i = Math.max(0, this.messages.length - 5); i < this.messages.length; i++) {
+                messagesDiv.append('<div class="message">' + this.messages[i] + '</div>');
+            }
+        };
+        
+        RoguelikeGame.prototype.addMessage = function(message) {
+            this.messages.push(message);
+            if (this.messages.length > 20) {
+                this.messages.shift();
+            }
+            console.log('Сообщение:', message);
+        };
+        
+        RoguelikeGame.prototype.bindEvents = function() {
+            var self = this;
+            console.log('Подключение событий клавиатуры');
+            
+            $(document).keydown(function(e) {
+                console.log('Нажата клавиша:', e.key, 'keyCode:', e.keyCode);
+                $('#last-key').text(e.key);
+                
+                if (self.gameOver) return;
+                
+                var key = e.key.toLowerCase();
+                
+                switch(key) {
+                    case 'w':
+                    case 'arrowup':
+                        self.moveHero(0, -1);
+                        e.preventDefault();
+                        break;
+                    case 's':
+                    case 'arrowdown':
+                        self.moveHero(0, 1);
+                        e.preventDefault();
+                        break;
+                    case 'a':
+                    case 'arrowleft':
+                        self.moveHero(-1, 0);
+                        e.preventDefault();
+                        break;
+                    case 'd':
+                    case 'arrowright':
+                        self.moveHero(1, 0);
+                        e.preventDefault();
+                        break;
+                    case ' ':
+                        self.heroAttack();
+                        e.preventDefault();
+                        break;
+                    case 'r':
+                        self.newGame();
+                        e.preventDefault();
+                        break;
+                }
+            });
+        };
+        
+        var game;
+        
+        $(document).ready(function() {
+            console.log('DOM полностью загружен');
+            try {
+                game = new RoguelikeGame();
+                console.log('Игра создана успешно');
+            } catch(error) {
+                console.error('Ошибка создания игры:', error);
+                alert('Ошибка инициализации игры: ' + error.message);
+            }
+        });
+        
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error('JavaScript ошибка:', message, 'в строке', lineno);
+            alert('Ошибка: ' + message + ' (строка ' + lineno + ')');
+            return false;
+        };
+    </script>
+</body>
+</html>

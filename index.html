@@ -133,6 +133,68 @@
             padding: 10px;
             font-size: 12px;
         }
+        
+        .attack-animation {
+            animation: attackFlash 0.3s ease-in-out;
+        }
+        
+        @keyframes attackFlash {
+            0% { 
+                background-color: rgba(255, 0, 0, 0); 
+                transform: scale(1);
+            }
+            50% { 
+                background-color: rgba(255, 0, 0, 0.7); 
+                transform: scale(1.1);
+            }
+            100% { 
+                background-color: rgba(255, 0, 0, 0); 
+                transform: scale(1);
+            }
+        }
+        
+        .damage-animation {
+            animation: damageShake 0.4s ease-in-out;
+        }
+        
+        @keyframes damageShake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-3px); }
+            75% { transform: translateX(3px); }
+        }
+        
+        .heal-animation {
+            animation: healGlow 0.5s ease-in-out;
+        }
+        
+        @keyframes healGlow {
+            0% { 
+                background-color: rgba(0, 255, 0, 0); 
+                transform: scale(1);
+            }
+            50% { 
+                background-color: rgba(0, 255, 0, 0.6); 
+                transform: scale(1.05);
+            }
+            100% { 
+                background-color: rgba(0, 255, 0, 0); 
+                transform: scale(1);
+            }
+        }
+        
+        .pickup-animation {
+            animation: pickupPulse 0.3s ease-in-out;
+        }
+        
+        @keyframes pickupPulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .move-animation {
+            transition: all 0.1s ease-in-out;
+        }
     </style>
 </head>
 <body>
@@ -161,12 +223,16 @@
                 W, A, S, D - движение<br>
                 ПРОБЕЛ - атака врагов рядом<br>
                 R - новая игра<br>
+                S + Ctrl - сохранить игру<br>
+                L + Ctrl - загрузить игру<br>
                 <div class="stat">Режим врагов: <span id="enemy-mode">Пошаговый</span></div>
             </div>
             
             <div id="messages"></div>
             
             <button onclick="game.newGame()">Новая игра</button>
+            <button onclick="game.saveGame()">Сохранить</button>
+            <button onclick="game.loadGame()">Загрузить</button>
         </div>
     </div>
 
@@ -325,6 +391,100 @@
             for (var y = 0; y < this.mapHeight; y++) {
                 this.map[y][centerX] = TILE_TYPES.FLOOR;
             }
+            
+            this.checkAndFixConnectivity();
+        };
+        
+        RoguelikeGame.prototype.checkAndFixConnectivity = function() {
+            var visited = [];
+            for (var y = 0; y < this.mapHeight; y++) {
+                visited[y] = [];
+                for (var x = 0; x < this.mapWidth; x++) {
+                    visited[y][x] = false;
+                }
+            }
+            
+            var startX = -1, startY = -1;
+            for (var y = 0; y < this.mapHeight && startX === -1; y++) {
+                for (var x = 0; x < this.mapWidth && startX === -1; x++) {
+                    if (this.map[y][x] === TILE_TYPES.FLOOR) {
+                        startX = x;
+                        startY = y;
+                    }
+                }
+            }
+            
+            if (startX !== -1) {
+                this.floodFill(startX, startY, visited);
+                this.connectUnreachableAreas(visited);
+            }
+        };
+        
+        RoguelikeGame.prototype.floodFill = function(x, y, visited) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) return;
+            if (visited[y][x] || this.map[y][x] === TILE_TYPES.WALL) return;
+            
+            visited[y][x] = true;
+            
+            this.floodFill(x + 1, y, visited);
+            this.floodFill(x - 1, y, visited);
+            this.floodFill(x, y + 1, visited);
+            this.floodFill(x, y - 1, visited);
+        };
+        
+        RoguelikeGame.prototype.connectUnreachableAreas = function(visited) {
+            for (var y = 1; y < this.mapHeight - 1; y++) {
+                for (var x = 1; x < this.mapWidth - 1; x++) {
+                    if (this.map[y][x] === TILE_TYPES.FLOOR && !visited[y][x]) {
+                        this.createPathToReachableArea(x, y, visited);
+                    }
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.createPathToReachableArea = function(startX, startY, visited) {
+            var directions = [
+                {x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}
+            ];
+            
+            var queue = [{x: startX, y: startY, path: []}];
+            var pathVisited = [];
+            
+            for (var y = 0; y < this.mapHeight; y++) {
+                pathVisited[y] = [];
+                for (var x = 0; x < this.mapWidth; x++) {
+                    pathVisited[y][x] = false;
+                }
+            }
+            
+            while (queue.length > 0) {
+                var current = queue.shift();
+                
+                if (pathVisited[current.y][current.x]) continue;
+                pathVisited[current.y][current.x] = true;
+                
+                if (visited[current.y][current.x]) {
+                    for (var i = 0; i < current.path.length; i++) {
+                        var pathPoint = current.path[i];
+                        this.map[pathPoint.y][pathPoint.x] = TILE_TYPES.FLOOR;
+                    }
+                    return;
+                }
+                
+                for (var i = 0; i < directions.length; i++) {
+                    var dir = directions[i];
+                    var newX = current.x + dir.x;
+                    var newY = current.y + dir.y;
+                    
+                    if (newX >= 0 && newX < this.mapWidth && newY >= 0 && newY < this.mapHeight) {
+                        if (!pathVisited[newY][newX]) {
+                            var newPath = current.path.slice();
+                            newPath.push({x: newX, y: newY});
+                            queue.push({x: newX, y: newY, path: newPath});
+                        }
+                    }
+                }
+            }
         };
         
         RoguelikeGame.prototype.placeEntities = function() {
@@ -461,12 +621,14 @@
                 if (entity.type === ENTITY_TYPES.SWORD) {
                     this.hero.attack += 10;
                     this.addMessage("Ты подобрал меч! Атака увеличена на 10.");
+                    this.addAnimation(x, y, 'pickup-animation');
                     this.removeEntity(entity);
                     console.log('Меч подобран, новая атака:', this.hero.attack);
                 } else if (entity.type === ENTITY_TYPES.POTION) {
                     var oldHealth = this.hero.health;
                     this.hero.health = Math.min(this.hero.maxHealth, this.hero.health + 30);
                     this.addMessage("Ты выпил зелье здоровья! Здоровье восстановлено на 30.");
+                    this.addAnimation(x, y, 'heal-animation');
                     this.removeEntity(entity);
                     console.log('Зелье выпито, здоровье:', oldHealth, '->', this.hero.health);
                 } else if (entity.type === ENTITY_TYPES.HERO || entity.type === ENTITY_TYPES.ENEMY) {
@@ -503,6 +665,9 @@
                 var entity = this.getEntityAt(targetX, targetY);
                 
                 if (entity && entity.type === ENTITY_TYPES.ENEMY) {
+                    this.addAnimation(this.hero.x, this.hero.y, 'attack-animation');
+                    this.addAnimation(targetX, targetY, 'damage-animation');
+                    
                     entity.health -= this.hero.attack;
                     attackedAny = true;
                     
@@ -533,18 +698,77 @@
             for (var i = 0; i < enemies.length; i++) {
                 var enemy = enemies[i];
                 
-                var directions = [
-                    {x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}
-                ];
+                var distanceToHero = Math.abs(enemy.x - this.hero.x) + Math.abs(enemy.y - this.hero.y);
                 
-                var dir = directions[this.random(0, directions.length)];
-                var newX = enemy.x + dir.x;
-                var newY = enemy.y + dir.y;
-                
-                if (this.isValidPosition(newX, newY) && !this.getEntityAt(newX, newY)) {
-                    enemy.x = newX;
-                    enemy.y = newY;
+                if (distanceToHero <= 5) {
+                    this.moveEnemyTowardsHero(enemy);
+                } else {
+                    this.moveEnemyRandomly(enemy);
                 }
+            }
+        };
+        
+        RoguelikeGame.prototype.moveEnemyTowardsHero = function(enemy) {
+            var dx = this.hero.x - enemy.x;
+            var dy = this.hero.y - enemy.y;
+            
+            var moveX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
+            var moveY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);
+            
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (this.canEnemyMoveTo(enemy, enemy.x + moveX, enemy.y)) {
+                    enemy.x += moveX;
+                    return;
+                }
+            } else if (Math.abs(dy) > 0) {
+                if (this.canEnemyMoveTo(enemy, enemy.x, enemy.y + moveY)) {
+                    enemy.y += moveY;
+                    return;
+                }
+            }
+            
+            if (Math.abs(dy) > 0 && this.canEnemyMoveTo(enemy, enemy.x, enemy.y + moveY)) {
+                enemy.y += moveY;
+            } else if (Math.abs(dx) > 0 && this.canEnemyMoveTo(enemy, enemy.x + moveX, enemy.y)) {
+                enemy.x += moveX;
+            } else {
+                this.moveEnemyRandomly(enemy);
+            }
+        };
+        
+        RoguelikeGame.prototype.moveEnemyRandomly = function(enemy) {
+            var directions = [
+                {x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}
+            ];
+            
+            var dir = directions[this.random(0, directions.length)];
+            var newX = enemy.x + dir.x;
+            var newY = enemy.y + dir.y;
+            
+            if (this.canEnemyMoveTo(enemy, newX, newY)) {
+                enemy.x = newX;
+                enemy.y = newY;
+            }
+        };
+        
+        RoguelikeGame.prototype.canEnemyMoveTo = function(enemy, x, y) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) return false;
+            if (this.map[y][x] === TILE_TYPES.WALL) return false;
+            
+            var entityAt = this.getEntityAt(x, y);
+            return !entityAt || entityAt === enemy;
+        };
+        
+        RoguelikeGame.prototype.addAnimation = function(x, y, animationClass) {
+            var self = this;
+            var selector = '.field .tile:nth-child(' + (y * this.mapWidth + x + 1) + ')';
+            var element = $(selector);
+            
+            if (element.length > 0) {
+                element.addClass(animationClass);
+                setTimeout(function() {
+                    element.removeClass(animationClass);
+                }, 500);
             }
         };
         
@@ -556,6 +780,9 @@
                 var distance = Math.abs(enemy.x - this.hero.x) + Math.abs(enemy.y - this.hero.y);
                 
                 if (distance === 1) {
+                    this.addAnimation(enemy.x, enemy.y, 'attack-animation');
+                    this.addAnimation(this.hero.x, this.hero.y, 'damage-animation');
+                    
                     this.hero.health -= enemy.attack;
                     this.addMessage("Враг атаковал тебя! У тебя осталось " + this.hero.health + " HP.");
                     
@@ -580,6 +807,67 @@
             var message = victory ? "Поздравляем! Ты победил всех врагов!" : "Игра окончена! Ты погиб.";
             var gameOverDiv = $('<div class="game-over"><h2>' + message + '</h2><button onclick="game.newGame()">Новая игра</button></div>');
             $('body').append(gameOverDiv);
+        };
+        
+        RoguelikeGame.prototype.saveGame = function() {
+            if (this.gameOver) {
+                this.addMessage("Нельзя сохранить завершенную игру!");
+                return false;
+            }
+            
+            var gameState = {
+                map: this.map,
+                entities: this.entities,
+                hero: this.hero,
+                messages: this.messages.slice(-10),
+                gameOver: this.gameOver,
+                enemyMode: this.enemyMode
+            };
+            
+            try {
+                localStorage.setItem('roguelike_save', JSON.stringify(gameState));
+                this.addMessage("Игра сохранена!");
+                return true;
+            } catch (e) {
+                this.addMessage("Ошибка при сохранении игры!");
+                console.error('Ошибка сохранения:', e);
+                return false;
+            }
+        };
+        
+        RoguelikeGame.prototype.loadGame = function() {
+            try {
+                var saved = localStorage.getItem('roguelike_save');
+                if (saved) {
+                    var gameState = JSON.parse(saved);
+                    
+                    this.map = gameState.map;
+                    this.entities = gameState.entities;
+                    this.hero = gameState.hero;
+                    this.messages = gameState.messages || [];
+                    this.gameOver = gameState.gameOver || false;
+                    this.enemyMode = gameState.enemyMode || 'turn-based';
+                    
+                    this.render();
+                    this.addMessage("Игра загружена!");
+                    if (this.enemyMode === 'real-time' && !this.gameOver) {
+                        this.startEnemyTimer();
+                    }
+                    
+                    return true;
+                } else {
+                    this.addMessage("Сохранений не найдено!");
+                    return false;
+                }
+            } catch (e) {
+                this.addMessage("Ошибка при загрузке игры!");
+                console.error('Ошибка загрузки:', e);
+                return false;
+            }
+        };
+        
+        RoguelikeGame.prototype.hasSavedGame = function() {
+            return localStorage.getItem('roguelike_save') !== null;
         };
         
         RoguelikeGame.prototype.render = function() {
@@ -664,9 +952,22 @@
                 console.log('Нажата клавиша:', e.key, 'keyCode:', e.keyCode);
                 $('#last-key').text(e.key);
                 
-                if (self.gameOver) return;
-                
                 var key = e.key.toLowerCase();
+                
+                if (e.ctrlKey) {
+                    switch(key) {
+                        case 's':
+                            self.saveGame();
+                            e.preventDefault();
+                            return;
+                        case 'l':
+                            self.loadGame();
+                            e.preventDefault();
+                            return;
+                    }
+                }
+                
+                if (self.gameOver) return;
                 
                 switch(key) {
                     case 'w':
@@ -676,8 +977,10 @@
                         break;
                     case 's':
                     case 'arrowdown':
-                        self.moveHero(0, 1);
-                        e.preventDefault();
+                        if (!e.ctrlKey) {
+                            self.moveHero(0, 1);
+                            e.preventDefault();
+                        }
                         break;
                     case 'a':
                     case 'arrowleft':
@@ -708,6 +1011,17 @@
             try {
                 game = new RoguelikeGame();
                 console.log('Игра создана успешно');
+                
+                if (game.hasSavedGame()) {
+                    var loadSaved = confirm('Найдено сохранение! Загрузить сохраненную игру?');
+                    if (loadSaved) {
+                        game.loadGame();
+                    } else {
+                        game.newGame();
+                    }
+                } else {
+                    game.newGame();
+                }
             } catch(error) {
                 console.error('Ошибка создания игры:', error);
                 alert('Ошибка инициализации игры: ' + error.message);

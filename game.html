@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Рогалик</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        
+        .field {
+            display: grid;
+            grid-template-columns: repeat(40, 20px);
+            grid-template-rows: repeat(24, 20px);
+            gap: 1px;
+            background-color: #333;
+            padding: 10px;
+            border: 2px solid #666;
+        }
+        
+        .tile {
+            width: 20px;
+            height: 20px;
+            position: relative;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        
+        .wall { 
+            background-image: url('tile-W.png');
+        }
+        .floor { 
+            background-image: url('tile-.png');
+        }
+        .hero { 
+            background-image: url('tile-P.png');
+        }
+        .enemy { 
+            background-image: url('tile-E.png');
+        }
+        .sword { 
+            background-image: url('tile-SW.png');
+        }
+        .potion { 
+            background-image: url('tile-HP.png');
+        }
+        
+        .health {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background-color: #4CAF50;
+            border: 1px solid #000;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="field"></div>
+
+    <script>
+        var TILE_TYPES = {
+            WALL: 0,
+            FLOOR: 1
+        };
+        
+        var ENTITY_TYPES = {
+            HERO: 'hero',
+            ENEMY: 'enemy', 
+            SWORD: 'sword',
+            POTION: 'potion'
+        };
+        
+        function RoguelikeGame() {
+            this.mapWidth = 40;
+            this.mapHeight = 24;
+            this.map = [];
+            this.entities = [];
+            this.hero = null;
+            this.gameOver = false;
+            this.init();
+        }
+        
+        RoguelikeGame.prototype.init = function() {
+            this.bindEvents();
+            this.newGame();
+        };
+        
+        RoguelikeGame.prototype.newGame = function() {
+            this.gameOver = false;
+            this.entities = [];
+            this.hero = {
+                type: ENTITY_TYPES.HERO,
+                x: 0,
+                y: 0,
+                health: 100,
+                maxHealth: 100,
+                attack: 10
+            };
+            
+            this.generateMap();
+            this.placeEntities();
+            this.render();
+        };
+        
+        RoguelikeGame.prototype.generateMap = function() {
+            for (var y = 0; y < this.mapHeight; y++) {
+                this.map[y] = [];
+                for (var x = 0; x < this.mapWidth; x++) {
+                    this.map[y][x] = TILE_TYPES.WALL;
+                }
+            }
+            
+            var rooms = [];
+            var roomCount = this.random(5, 11);
+            
+            for (var i = 0; i < roomCount; i++) {
+                var room = {
+                    x: this.random(1, this.mapWidth - 8),
+                    y: this.random(1, this.mapHeight - 8),
+                    width: this.random(3, 9),
+                    height: this.random(3, 9)
+                };
+                
+                if (!this.roomOverlaps(room, rooms)) {
+                    this.createRoom(room);
+                    rooms.push(room);
+                }
+            }
+            
+            var hPasses = this.random(3, 6);
+            var usedHorizontalLines = [];
+            
+            for (var i = 0; i < hPasses; i++) {
+                var attempts = 0;
+                var y;
+                do {
+                    y = this.random(2, this.mapHeight - 2);
+                    attempts++;
+                } while (this.isLineNearby(usedHorizontalLines, y) && attempts < 50);
+                
+                if (attempts < 50) {
+                    usedHorizontalLines.push(y);
+                    for (var x = 0; x < this.mapWidth; x++) {
+                        this.map[y][x] = TILE_TYPES.FLOOR;
+                    }
+                }
+            }
+            
+            var vPasses = this.random(2, 4);
+            var usedVerticalLines = [];
+            
+            for (var i = 0; i < vPasses; i++) {
+                var attempts = 0;
+                var x;
+                do {
+                    x = this.random(2, this.mapWidth - 2);
+                    attempts++;
+                } while (this.isLineNearby(usedVerticalLines, x) && attempts < 50);
+                
+                if (attempts < 50) {
+                    usedVerticalLines.push(x);
+                    for (var y = 0; y < this.mapHeight; y++) {
+                        this.map[y][x] = TILE_TYPES.FLOOR;
+                    }
+                }
+            }
+            
+            this.ensureConnectivity();
+        };
+        
+        RoguelikeGame.prototype.isLineNearby = function(usedLines, newLine) {
+            for (var i = 0; i < usedLines.length; i++) {
+                if (Math.abs(usedLines[i] - newLine) <= 2) { 
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        RoguelikeGame.prototype.ensureConnectivity = function() {
+            var centerX = Math.floor(this.mapWidth / 2);
+            var centerY = Math.floor(this.mapHeight / 2);
+            
+            for (var x = 0; x < this.mapWidth; x++) {
+                this.map[centerY][x] = TILE_TYPES.FLOOR;
+            }
+            
+            for (var y = 0; y < this.mapHeight; y++) {
+                this.map[y][centerX] = TILE_TYPES.FLOOR;
+            }
+            
+            var maxAttempts = 5;
+            for (var attempt = 0; attempt < maxAttempts; attempt++) {
+                var visited = [];
+                for (var y = 0; y < this.mapHeight; y++) {
+                    visited[y] = [];
+                    for (var x = 0; x < this.mapWidth; x++) {
+                        visited[y][x] = false;
+                    }
+                }
+                
+                this.floodFill(centerX, centerY, visited);
+                
+                var foundIsolated = false;
+                for (var y = 0; y < this.mapHeight && !foundIsolated; y++) {
+                    for (var x = 0; x < this.mapWidth && !foundIsolated; x++) {
+                        if (this.map[y][x] === TILE_TYPES.FLOOR && !visited[y][x]) {
+                            this.createPathToMainArea(x, y, centerX, centerY);
+                            foundIsolated = true;
+                        }
+                    }
+                }
+                
+                if (!foundIsolated) {
+                    break;
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.floodFill = function(x, y, visited) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) return;
+            if (visited[y][x] || this.map[y][x] === TILE_TYPES.WALL) return;
+            
+            visited[y][x] = true;
+            
+            this.floodFill(x + 1, y, visited);
+            this.floodFill(x - 1, y, visited);
+            this.floodFill(x, y + 1, visited);
+            this.floodFill(x, y - 1, visited);
+        };
+        
+        RoguelikeGame.prototype.createPathToMainArea = function(startX, startY, targetX, targetY) {
+            var x = startX;
+            var y = startY;
+            
+            while (x !== targetX) {
+                this.map[y][x] = TILE_TYPES.FLOOR;
+                x += (targetX > x) ? 1 : -1;
+            }
+            
+            while (y !== targetY) {
+                this.map[y][x] = TILE_TYPES.FLOOR;
+                y += (targetY > y) ? 1 : -1;
+            }
+        };
+        
+        RoguelikeGame.prototype.roomOverlaps = function(newRoom, existingRooms) {
+            for (var i = 0; i < existingRooms.length; i++) {
+                var room = existingRooms[i];
+                if (newRoom.x < room.x + room.width + 1 && 
+                    newRoom.x + newRoom.width + 1 > room.x &&
+                    newRoom.y < room.y + room.height + 1 && 
+                    newRoom.y + newRoom.height + 1 > room.y) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        RoguelikeGame.prototype.createRoom = function(room) {
+            for (var y = room.y; y < room.y + room.height; y++) {
+                for (var x = room.x; x < room.x + room.width; x++) {
+                    this.map[y][x] = TILE_TYPES.FLOOR;
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.placeEntities = function() {
+            this.placeEntityRandomly(this.hero);
+            
+            for (var i = 0; i < 10; i++) {
+                var enemy = {
+                    type: ENTITY_TYPES.ENEMY,
+                    x: 0,
+                    y: 0,
+                    health: 30,
+                    maxHealth: 30,
+                    attack: 8
+                };
+                this.placeEntityRandomly(enemy);
+                this.entities.push(enemy);
+            }
+            
+            for (var i = 0; i < 2; i++) {
+                var sword = {
+                    type: ENTITY_TYPES.SWORD,
+                    x: 0,
+                    y: 0
+                };
+                this.placeEntityRandomly(sword);
+                this.entities.push(sword);
+            }
+            
+            for (var i = 0; i < 10; i++) {
+                var potion = {
+                    type: ENTITY_TYPES.POTION,
+                    x: 0,
+                    y: 0
+                };
+                this.placeEntityRandomly(potion);
+                this.entities.push(potion);
+            }
+        };
+        
+        RoguelikeGame.prototype.placeEntityRandomly = function(entity) {
+            var attempts = 0;
+            do {
+                entity.x = this.random(0, this.mapWidth);
+                entity.y = this.random(0, this.mapHeight);
+                attempts++;
+                
+                var occupied = false;
+                
+                if (this.map[entity.y][entity.x] === TILE_TYPES.WALL) {
+                    occupied = true;
+                }
+                
+                if (!occupied) {
+                    if (this.hero.x === entity.x && this.hero.y === entity.y && entity !== this.hero) {
+                        occupied = true;
+                    }
+                    
+                    for (var i = 0; i < this.entities.length; i++) {
+                        if (this.entities[i].x === entity.x && this.entities[i].y === entity.y && 
+                            this.entities[i] !== entity) {
+                            occupied = true;
+                            break;
+                        }
+                    }
+                }
+                
+            } while (occupied && attempts < 100);
+        };
+        
+        RoguelikeGame.prototype.random = function(min, max) {
+            return Math.floor(Math.random() * (max - min)) + min;
+        };
+        
+        RoguelikeGame.prototype.getEntityAt = function(x, y) {
+            for (var i = 0; i < this.entities.length; i++) {
+                if (this.entities[i].x === x && this.entities[i].y === y) {
+                    return this.entities[i];
+                }
+            }
+            
+            if (this.hero.x === x && this.hero.y === y) return this.hero;
+            return null;
+        };
+        
+        RoguelikeGame.prototype.removeEntity = function(entity) {
+            var index = this.entities.indexOf(entity);
+            if (index > -1) {
+                this.entities.splice(index, 1);
+            }
+        };
+        
+        RoguelikeGame.prototype.moveHero = function(dx, dy) {
+            if (this.gameOver) return;
+            
+            var newX = this.hero.x + dx;
+            var newY = this.hero.y + dy;
+            
+            if (this.isValidPosition(newX, newY)) {
+                this.hero.x = newX;
+                this.hero.y = newY;
+                this.checkItems();
+                this.moveEnemies();
+                this.enemyAttacks();
+                this.checkGameState();
+                this.render();
+            }
+        };
+        
+        RoguelikeGame.prototype.isValidPosition = function(x, y) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) {
+                return false;
+            }
+            
+            if (this.map[y][x] === TILE_TYPES.WALL) {
+                return false;
+            }
+            
+            for (var i = 0; i < this.entities.length; i++) {
+                if (this.entities[i].x === x && this.entities[i].y === y && 
+                    this.entities[i].type === ENTITY_TYPES.ENEMY) {
+                    return false;
+                }
+            }
+            
+            return true;
+        };
+        
+        RoguelikeGame.prototype.checkItems = function() {
+            for (var i = 0; i < this.entities.length; i++) {
+                var entity = this.entities[i];
+                if (entity.x === this.hero.x && entity.y === this.hero.y) {
+                    if (entity.type === ENTITY_TYPES.SWORD) {
+                        this.hero.attack = Math.floor(this.hero.attack * 1.5); 
+                        this.removeEntity(entity);
+                        break;
+                    } else if (entity.type === ENTITY_TYPES.POTION) {
+                        this.hero.health = Math.min(this.hero.maxHealth, 
+                            this.hero.health + Math.floor(this.hero.maxHealth * 0.3)); 
+                        this.removeEntity(entity);
+                        break; 
+                    }
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.heroAttack = function() {
+            if (this.gameOver) return;
+            
+            var directions = [
+                {x: -1, y: -1}, {x: 0, y: -1}, {x: 1, y: -1},
+                {x: -1, y: 0},                 {x: 1, y: 0},
+                {x: -1, y: 1},  {x: 0, y: 1},  {x: 1, y: 1}
+            ];
+            
+            for (var i = 0; i < directions.length; i++) {
+                var dir = directions[i];
+                var targetX = this.hero.x + dir.x;
+                var targetY = this.hero.y + dir.y;
+                var entity = this.getEntityAt(targetX, targetY);
+                
+                if (entity && entity.type === ENTITY_TYPES.ENEMY) {
+                    entity.health -= this.hero.attack;
+                    
+                    if (entity.health <= 0) {
+                        this.removeEntity(entity);
+                    }
+                }
+            }
+            
+            this.moveEnemies();
+            this.enemyAttacks();
+            this.checkGameState();
+            this.render();
+        };
+        
+        RoguelikeGame.prototype.moveEnemies = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            for (var i = 0; i < enemies.length; i++) {
+                var enemy = enemies[i];
+                var distanceToHero = Math.abs(enemy.x - this.hero.x) + Math.abs(enemy.y - this.hero.y);
+                
+                if (distanceToHero <= 5) {
+                    this.moveEnemyTowardsHero(enemy);
+                } else {
+                    this.moveEnemyRandomly(enemy);
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.moveEnemyTowardsHero = function(enemy) {
+            var dx = this.hero.x - enemy.x;
+            var dy = this.hero.y - enemy.y;
+            
+            var moveX = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
+            var moveY = dy > 0 ? 1 : (dy < 0 ? -1 : 0);
+            
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (this.canEnemyMoveTo(enemy, enemy.x + moveX, enemy.y)) {
+                    enemy.x += moveX;
+                    return;
+                }
+            } else if (Math.abs(dy) > 0) {
+                if (this.canEnemyMoveTo(enemy, enemy.x, enemy.y + moveY)) {
+                    enemy.y += moveY;
+                    return;
+                }
+            }
+            
+            if (Math.abs(dy) > 0 && this.canEnemyMoveTo(enemy, enemy.x, enemy.y + moveY)) {
+                enemy.y += moveY;
+            } else if (Math.abs(dx) > 0 && this.canEnemyMoveTo(enemy, enemy.x + moveX, enemy.y)) {
+                enemy.x += moveX;
+            } else {
+                this.moveEnemyRandomly(enemy);
+            }
+        };
+        
+        RoguelikeGame.prototype.moveEnemyRandomly = function(enemy) {
+            var directions = [
+                {x: 0, y: -1}, {x: 1, y: 0}, {x: 0, y: 1}, {x: -1, y: 0}
+            ];
+            
+            var dir = directions[this.random(0, directions.length)];
+            var newX = enemy.x + dir.x;
+            var newY = enemy.y + dir.y;
+            
+            if (this.canEnemyMoveTo(enemy, newX, newY)) {
+                enemy.x = newX;
+                enemy.y = newY;
+            }
+        };
+        
+        RoguelikeGame.prototype.canEnemyMoveTo = function(enemy, x, y) {
+            if (x < 0 || x >= this.mapWidth || y < 0 || y >= this.mapHeight) return false;
+            if (this.map[y][x] === TILE_TYPES.WALL) return false;
+            
+            if (this.hero.x === x && this.hero.y === y) return false;
+            
+            for (var i = 0; i < this.entities.length; i++) {
+                if (this.entities[i].x === x && this.entities[i].y === y && 
+                    this.entities[i].type === ENTITY_TYPES.ENEMY && 
+                    this.entities[i] !== enemy) {
+                    return false;
+                }
+            }
+            
+            return true;
+        };
+        
+        RoguelikeGame.prototype.enemyAttacks = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            for (var i = 0; i < enemies.length; i++) {
+                var enemy = enemies[i];
+                var distance = Math.abs(enemy.x - this.hero.x) + Math.abs(enemy.y - this.hero.y);
+                
+                if (distance === 1) {
+                    this.hero.health -= enemy.attack;
+                    
+                    if (this.hero.health <= 0) {
+                        this.gameOver = true;
+                        alert("Игра окончена! Ты погиб.");
+                    }
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.checkGameState = function() {
+            var enemies = this.entities.filter(function(e) { return e.type === ENTITY_TYPES.ENEMY; });
+            
+            if (enemies.length === 0) {
+                this.gameOver = true;
+                alert("Поздравляем! Ты победил всех врагов!");
+            }
+        };
+        
+        RoguelikeGame.prototype.render = function() {
+            var field = $('.field');
+            field.empty();
+            
+            for (var y = 0; y < this.mapHeight; y++) {
+                for (var x = 0; x < this.mapWidth; x++) {
+                    var tile = $('<div class="tile"></div>');
+                    
+                    if (this.map[y][x] === TILE_TYPES.WALL) {
+                        tile.addClass('wall');
+                    } else {
+                        tile.addClass('floor');
+                    }
+                    
+                    var entity = this.getEntityAt(x, y);
+                    if (entity) {
+                        if (entity.type === ENTITY_TYPES.HERO) {
+                            tile.addClass('hero');
+                            var healthPercent = (entity.health / entity.maxHealth) * 100;
+                            tile.append('<div class="health" style="width: ' + healthPercent + '%;"></div>');
+                        } else if (entity.type === ENTITY_TYPES.ENEMY) {
+                            tile.addClass('enemy');
+                            var healthPercent = (entity.health / entity.maxHealth) * 100;
+                            tile.append('<div class="health" style="width: ' + healthPercent + '%;"></div>');
+                        } else if (entity.type === ENTITY_TYPES.SWORD) {
+                            tile.addClass('sword');
+                        } else if (entity.type === ENTITY_TYPES.POTION) {
+                            tile.addClass('potion');
+                        }
+                    }
+                    
+                    field.append(tile);
+                }
+            }
+        };
+        
+        RoguelikeGame.prototype.bindEvents = function() {
+            var self = this;
+            
+            $(document).keydown(function(e) {
+                if (self.gameOver) return;
+                
+                var key = e.key.toLowerCase();
+                
+                switch(key) {
+                    case 'w':
+                    case 'arrowup':
+                        self.moveHero(0, -1);
+                        e.preventDefault();
+                        break;
+                    case 's':
+                    case 'arrowdown':
+                        self.moveHero(0, 1);
+                        e.preventDefault();
+                        break;
+                    case 'a':
+                    case 'arrowleft':
+                        self.moveHero(-1, 0);
+                        e.preventDefault();
+                        break;
+                    case 'd':
+                    case 'arrowright':
+                        self.moveHero(1, 0);
+                        e.preventDefault();
+                        break;
+                    case ' ':
+                        self.heroAttack();
+                        e.preventDefault();
+                        break;
+                    case 'r':
+                        self.newGame();
+                        e.preventDefault();
+                        break;
+                }
+            });
+        };
+        
+        var game;
+        
+        $(document).ready(function() {
+            game = new RoguelikeGame();
+        });
+    </script>
+</body>
+</html>
